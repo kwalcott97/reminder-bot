@@ -1,0 +1,8 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "deploy": {
+    "startCommand": "python reminder_bot.py",
+    "cronSchedule": "0 16 * * *",
+    "restartPolicyType": "NEVER"
+  }
+}
