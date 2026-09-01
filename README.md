@@ -47,10 +47,12 @@ python3 /Users/keith_tetrad/reminder-bot/reminder_bot.py --dry-run --date 2026-1
 
 ## Setup
 
-**1. The Slack app.** At <https://api.slack.com/apps> create an app in
-the lab's workspace, add the `chat:write` bot scope under *OAuth &
-Permissions*, install it, and copy the bot token (`xoxb-…`). In Slack,
-invite it to the channel: `/invite @your-bot-name` in `#general`.
+**1. The Slack app.** At <https://api.slack.com/apps> choose *Create New
+App → From an app manifest*, pick the lab's workspace, and paste in
+`slack-app-manifest.yaml` from this folder — that sets the name and the
+one permission it needs (`chat:write`). Install it, then copy the **Bot
+User OAuth Token** (`xoxb-…`) from *OAuth & Permissions*. Finally, in
+Slack, invite it to the channel: `/invite @reminder-bot` in `#general`.
 
 **2. Member IDs, optional.** A bare `@Keith W` in a Slack message is just
 text — a real ping needs the person's member ID (click their profile →
