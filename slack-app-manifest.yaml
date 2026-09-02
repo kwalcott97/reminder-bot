@@ -1,0 +1,26 @@
+# Paste this into Slack's "Create New App -> From an app manifest" flow.
+# It configures the app exactly as this bot needs: a bot user that can post
+# messages, and nothing else.
+display_information:
+  name: Reminder Bot
+  description: Posts the weekly autoclaving and monthly TC restocking rota
+  background_color: "#2c3e50"
+
+features:
+  bot_user:
+    display_name: reminder-bot
+    # The bot only wakes once a day, so don't claim to be always online.
+    always_online: false
+
+oauth_config:
+  scopes:
+    bot:
+      # chat:write is the only permission needed — post messages to channels
+      # the bot has been invited to. Add chat:write.public alongside it if you
+      # ever want it to post without being invited first.
+      - chat:write
+
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

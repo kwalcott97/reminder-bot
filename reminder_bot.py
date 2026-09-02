@@ -3,7 +3,8 @@
 
 Two messages, both driven by schedule.csv: the weekly duty roundup every
 Monday, and a one-line note naming the new TC stocker on the 1st of each
-month. Run daily at 9am and it picks whichever applies to that day.
+month. Run daily; it picks whichever applies to that day, and stays quiet
+on days that call for neither.
 """
 
 import argparse
@@ -24,6 +25,9 @@ WEEKLY_TASK = "Autoclaving tips"
 MONTHLY_TASK = "Restock TC room"
 # What the 1st-of-the-month announcement calls the job.
 MONTHLY_ROLE = "TC stocker"
+
+# How much notice to give in the logs before a rota runs out.
+LOW_ROTA_DAYS = 21
 
 
 class ScheduleError(Exception):
@@ -85,34 +89,29 @@ def monday_of(day):
     return day - dt.timedelta(days=day.weekday())
 
 
-def assignment_on(schedule, day):
-    """The entry in effect on `day`: the latest one that has already started."""
-    current = None
-    for start, name in schedule:
-        if start <= day:
-            current = (start, name)
-        else:
-            break
-    return current
-
-
-def weekly_assignment(schedule, monday):
-    """Prefer the row dated exactly this Monday, else whatever is in effect."""
+def weekly_for(schedule, monday):
+    """The weekly entry dated exactly this Monday, or None."""
     for start, name in schedule:
         if start == monday:
             return (start, name)
-    return assignment_on(schedule, monday)
+    return None
 
 
-def next_assignment(schedule, day):
+def monthly_for(schedule, day):
+    """The monthly entry covering day's calendar month, or None.
+
+    Keyed by the month itself rather than "the most recent start date
+    that has passed", so running off the end of the rota reads as
+    unassigned instead of repeating the last person indefinitely.
+    """
     for start, name in schedule:
-        if start > day:
+        if (start.year, start.month) == (day.year, day.month):
             return (start, name)
     return None
 
 
 def load_user_map(path):
-    """Optional {"Keith W": "U01ABCDEF"} map so mentions actually ping.
+    """Optional {"Anthony": "U01ABCDEF"} map so mentions actually ping.
 
     Comes from $SLACK_USER_MAP when set, so a hosted deploy needs no file;
     otherwise from `path` on disk.
@@ -142,20 +141,48 @@ def mention(name, user_map):
     return "@%s" % name
 
 
+def report_health(weekly, monthly, user_map, today):
+    """Print warnings to the log. None of this reaches Slack."""
+    names = sorted({name for _, name in weekly + monthly})
+    unmapped = [n for n in names if n.lower() not in user_map]
+    if unmapped:
+        print(
+            "Warning: no Slack ID for %s — they post as plain text, not a "
+            "mention. Add them to SLACK_USER_MAP." % ", ".join(unmapped),
+            file=sys.stderr,
+        )
+
+    for schedule, label in ((weekly, WEEKLY_TASK), (monthly, MONTHLY_TASK)):
+        last = schedule[-1][0]
+        if last < today:
+            print(
+                "Warning: the %s rota ran out on %s — add rows to "
+                "schedule.csv." % (label, last.strftime("%-d %B %Y")),
+                file=sys.stderr,
+            )
+        elif (last - today).days <= LOW_ROTA_DAYS:
+            print(
+                "Note: the %s rota ends on %s."
+                % (label, last.strftime("%-d %B %Y")),
+                file=sys.stderr,
+            )
+
+
 def build_weekly_message(monday, weekly, monthly, user_map):
     """Return the Monday roundup for the week beginning `monday`."""
     lines = [
         "*Lab duties for the week of %s*" % monday.strftime("%B %-d"),
         "",
     ]
+    unassigned = "_nobody assigned — the rota needs updating_"
 
-    this_week = weekly_assignment(weekly, monday)
-    if this_week:
-        lines.append("• *%s:* %s" % (WEEKLY_TASK, mention(this_week[1], user_map)))
-    else:
-        lines.append("• *%s:* _nobody assigned — the rota needs updating_" % WEEKLY_TASK)
+    this_week = weekly_for(weekly, monday)
+    lines.append(
+        "• *%s:* %s"
+        % (WEEKLY_TASK, mention(this_week[1], user_map) if this_week else unassigned)
+    )
 
-    this_month = assignment_on(monthly, monday)
+    this_month = monthly_for(monthly, monday)
     if this_month:
         lines.append(
             "• *%s:* %s (for %s)"
@@ -166,27 +193,14 @@ def build_weekly_message(monday, weekly, monthly, user_map):
             )
         )
     else:
-        upcoming = next_assignment(monthly, monday)
-        if upcoming:
-            lines.append(
-                "• *%s:* %s starts %s"
-                % (
-                    MONTHLY_TASK,
-                    mention(upcoming[1], user_map),
-                    upcoming[0].strftime("%B %-d"),
-                )
-            )
-        else:
-            lines.append(
-                "• *%s:* _nobody assigned — the rota needs updating_" % MONTHLY_TASK
-            )
+        lines.append("• *%s:* %s" % (MONTHLY_TASK, unassigned))
 
     return "\n".join(lines)
 
 
 def build_monthly_message(today, monthly, user_map):
     """Return the 1st-of-the-month announcement, or None if nobody is on."""
-    current = assignment_on(monthly, today)
+    current = monthly_for(monthly, today)
     if not current:
         return None
     return "*%s for %s is %s*" % (
@@ -247,7 +261,24 @@ def main(argv=None):
         help="which message to send; auto (the default) sends the weekly "
         "roundup on Mondays and the TC stocker note on the 1st",
     )
+    parser.add_argument(
+        "--only-at-hour",
+        type=int,
+        metavar="H",
+        help="exit quietly unless the clock reads hour H. The hosting "
+        "platform reruns this on every deploy, so without this a deploy on "
+        "a Monday or the 1st would post a duplicate.",
+    )
     args = parser.parse_args(argv)
+
+    if args.only_at_hour is not None:
+        now = dt.datetime.now()
+        if now.hour != args.only_at_hour:
+            print(
+                "Clock reads %s, not hour %02d:00 — not a scheduled run, so "
+                "nothing to do." % (now.strftime("%H:%M"), args.only_at_hour)
+            )
+            return 0
 
     today = (
         dt.datetime.strptime(args.date, "%Y-%m-%d").date()
@@ -261,6 +292,7 @@ def main(argv=None):
         print("Could not read the schedule: %s" % exc, file=sys.stderr)
         return 1
     user_map = load_user_map(args.users)
+    report_health(weekly, monthly, user_map, today)
 
     messages = []
     if args.kind in ("weekly", "both") or (args.kind == "auto" and today.weekday() == 0):
@@ -268,12 +300,7 @@ def main(argv=None):
             ("weekly", build_weekly_message(monday_of(today), weekly, monthly, user_map))
         )
     if args.kind in ("monthly", "both") or (
-        # Only on the 1st, and only when someone's turn actually starts today
-        # — otherwise a month missing from the CSV would re-announce the
-        # previous month's person as if they were new.
-        args.kind == "auto"
-        and today.day == 1
-        and any(start == today for start, _ in monthly)
+        args.kind == "auto" and today.day == 1 and monthly_for(monthly, today)
     ):
         messages.append(("monthly", build_monthly_message(today, monthly, user_map)))
 
