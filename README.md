@@ -25,7 +25,7 @@ Both rotas live in `schedule.csv`, two pairs of columns side by side:
 
 | Autoclaving tips | Date Assigned | Restock TC room | Date Assigned |
 | --- | --- | --- | --- |
-| @Cole Tharp | 8/31/26 | @Keith W | 9/1/26 |
+| Cole | 9/7/26 | Anthony | 9/1/26 |
 
 Each date is the day that person's turn *starts*. The weekly dates are
 Mondays; the monthly ones are the first of the month. The two columns are
